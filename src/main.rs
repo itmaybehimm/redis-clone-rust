@@ -11,11 +11,6 @@ use tokio::{net::TcpListener, sync::RwLock};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
     let db: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
-    {
-        let mut instance = db.write().await;
-        instance.insert("foo".to_owned(), "bar".to_owned());
-    }
-
     loop {
         let (socket, _) = listener.accept().await?;
         let instance = Arc::clone(&db);

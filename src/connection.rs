@@ -1,5 +1,7 @@
 use anyhow::Result;
+
 use redis_rust::{RespHandler, Value};
+
 use std::{collections::HashMap, sync::Arc};
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
@@ -14,7 +16,6 @@ pub async fn handle_connection(
     loop {
         let value = client_handler.read_value().await?;
         // dbg!(&value);
-        println!("Request: {:?}", &value);
 
         let response = if let Some(value) = value {
             let (command, args) = extract_command(value)?;
@@ -34,7 +35,6 @@ pub async fn handle_connection(
             println!("Client requested to quit.");
             break;
         };
-        println!("Resonse: {:?}", &response);
 
         if let Err(err) = client_handler.write_value(response).await {
             eprintln!("Error writing to socket: {}", err);

@@ -1,12 +1,12 @@
 use anyhow::{Ok, Result};
 use tokio::net::{TcpListener, TcpStream};
 
-use redis_rust::ClientHandler;
+use redis_rust::RespHandler;
 use redis_rust::Value;
 
 async fn handle_connection(socket: TcpStream) -> Result<()> {
     println!("Accepted new connection: {:?}", socket);
-    let mut client_handler = ClientHandler::new(socket);
+    let mut client_handler = RespHandler::new(socket);
     // In a loop, read data from the socket and write the data back.
     loop {
         let value = client_handler.read_value().await?;

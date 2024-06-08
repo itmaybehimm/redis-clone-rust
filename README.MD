@@ -12,12 +12,11 @@ This project implements a simple Redis-like server in Rust, supporting basic com
 ### Running the Server
 
 1. Clone the repository:
+
    ```sh
    git clone https://github.com/your-username/redis-rust-server.git
    cd redis-rust-server
    ```
-
-````
 
 2. Run the server using Cargo:
    ```sh
@@ -81,10 +80,3 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 - [Tokio](https://tokio.rs) for asynchronous runtime.
 - [Redis](https://redis.io) for inspiration.
-
-```
-
-This `README.md` provides a comprehensive guide to running the server, using `redis-cli` for testing, and explains the concurrency control mechanism used in the project.
-
-
-````

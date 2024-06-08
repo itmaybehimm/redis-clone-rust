@@ -220,7 +220,6 @@ mod tests {
         let mut buffer = vec![0; 12];
 
         server.read_exact(&mut buffer).await?;
-        dbg!("await pass");
 
         assert_eq!(buffer, b"$6\r\nfoobar\r\n");
         Ok(())

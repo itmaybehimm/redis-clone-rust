@@ -1,9 +1,13 @@
 use anyhow::{Context, Ok, Result};
 use bytes::BytesMut;
-use tokio::{io::AsyncReadExt, net::TcpStream};
-#[derive(Debug, PartialEq)]
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
+#[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     SimpleString(String),
+    SimpleError(String),
     BulkString(String),
     Array(Vec<Value>),
     InvalidValue,
@@ -21,6 +25,7 @@ impl Value {
         match self {
             Value::SimpleString(s) => format!("+{}\r\n", s),
             Value::BulkString(s) => format!("${}\r\n{}\r\n", s.chars().count(), s),
+            Value::SimpleError(s) => format!("-{}\r\n", s),
             _ => panic!("Unsupported value"),
         }
     }
@@ -41,14 +46,17 @@ impl ClientHandler {
         if bytes_read == 0 {
             return Ok(None);
         }
+        // dbg!(bytes_read);
+        dbg!(&self.buffer);
 
         let (value, _) = parse_message(self.buffer.split())?;
 
         Ok(Some(value))
     }
 
-    pub async fn write_value(&mut self) {
-        //TODO
+    pub async fn write_value(&mut self, value: Value) -> Result<()> {
+        self.socket.write_all(value.serialize().as_bytes()).await?;
+        Ok(())
     }
 }
 
@@ -119,7 +127,7 @@ fn read_until_crfl(buffer: &[u8]) -> Option<(&[u8], usize)> {
     for i in 1..buffer.len() {
         if buffer[i - 1] == b'\r' && buffer[i] == b'\n' {
             // say abc\r\nab\r\n is buffer so upto \n is i=4 which consumes 5 bytes
-            return Some((&buffer[0..i], i + 1));
+            return Some((&buffer[0..i - 1], i + 1));
         }
     }
     None
@@ -128,6 +136,8 @@ fn read_until_crfl(buffer: &[u8]) -> Option<(&[u8], usize)> {
 fn parse_int(buffer: &[u8]) -> Result<i64> {
     let string =
         String::from_utf8(buffer.to_vec()).context("Failed to convert buffer to UTF-8 string")?;
+    // dbg!(&string);
+
     let number = string
         .parse::<i64>()
         .context("Failed to parse string as i64")?;

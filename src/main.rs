@@ -17,13 +17,22 @@ async fn handle_connection(socket: TcpStream) -> Result<()> {
             match command.to_lowercase().as_str() {
                 "ping" => Value::SimpleString("PONG".to_owned()),
                 "echo" => args.first().unwrap().clone(),
+                "quit" => {
+                    println!("Client requested to quit.");
+                    break;
+                }
                 _ => Value::SimpleError("Invalid command".to_owned()),
             }
         } else {
-            Value::SimpleError("Invalid command".to_owned())
+            println!("Client requested to quit.");
+            break;
         };
-        client_handler.write_value(response).await?;
+        if let Err(err) = client_handler.write_value(response).await {
+            eprintln!("Error writing to socket: {}", err);
+            break;
+        }
     }
+    Ok(())
 }
 
 #[tokio::main]

@@ -143,3 +143,128 @@ fn parse_int(buffer: &[u8]) -> Result<i64> {
         .context("Failed to parse string as i64")?;
     Ok(number)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    #[tokio::test]
+    async fn test_simple_string_serialization() {
+        let value = Value::SimpleString("OK".to_string());
+        assert_eq!(value.serialize(), "+OK\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_bulk_string_serialization() {
+        let value = Value::BulkString("foobar".to_string());
+        assert_eq!(value.serialize(), "$6\r\nfoobar\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_simple_error_serialization() {
+        let value = Value::SimpleError("Error message".to_string());
+        assert_eq!(value.serialize(), "-Error message\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_read_simple_string() -> Result<()> {
+        let (client, mut server) = create_client_server().await?;
+
+        // Write a simple string to the server side
+        server.write_all(b"+OK\r\n").await?;
+
+        let mut handler = ClientHandler::new(client);
+        let value = handler.read_value().await?.unwrap();
+
+        assert_eq!(value, Value::SimpleString("OK".to_string()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_read_bulk_string() -> Result<()> {
+        let (client, mut server) = create_client_server().await?;
+
+        // Write a bulk string to the server side
+        server.write_all(b"$6\r\nfoobar\r\n").await?;
+
+        let mut handler = ClientHandler::new(client);
+        let value = handler.read_value().await?.unwrap();
+
+        assert_eq!(value, Value::BulkString("foobar".to_string()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_read_simple_error() -> Result<()> {
+        let (client, mut server) = create_client_server().await?;
+
+        // Write a simple error to the server side
+        server.write_all(b"-Error message\r\n").await?;
+
+        let mut handler = ClientHandler::new(client);
+        let value = handler.read_value().await?.unwrap();
+
+        assert_eq!(value, Value::SimpleError("Error message".to_string()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_write_simple_string() -> Result<()> {
+        let (client, mut server) = create_client_server().await?;
+
+        let mut handler = ClientHandler::new(client);
+        handler
+            .write_value(Value::SimpleString("OK".to_string()))
+            .await?;
+
+        let mut buffer = vec![0; 5];
+        server.read_exact(&mut buffer).await?;
+
+        assert_eq!(buffer, b"+OK\r\n");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_write_bulk_string() -> Result<()> {
+        let (client, mut server) = create_client_server().await?;
+
+        let mut handler = ClientHandler::new(client);
+        handler
+            .write_value(Value::BulkString("foobar".to_string()))
+            .await?;
+
+        let mut buffer = vec![0; 13];
+        server.read_exact(&mut buffer).await?;
+
+        assert_eq!(buffer, b"$6\r\nfoobar\r\n");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_write_simple_error() -> Result<()> {
+        let (client, mut server) = create_client_server().await?;
+
+        let mut handler = ClientHandler::new(client);
+        handler
+            .write_value(Value::SimpleError("Error message".to_string()))
+            .await?;
+
+        let mut buffer = vec![0; 16];
+        server.read_exact(&mut buffer).await?;
+
+        assert_eq!(buffer, b"-Error message\r\n");
+        Ok(())
+    }
+
+    // Helper function to create a client-server pair for testing
+    async fn create_client_server() -> Result<(TcpStream, TcpStream)> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let client = TcpStream::connect(addr).await?;
+        let (server, _) = listener.accept().await?;
+        Ok((client, server))
+    }
+}

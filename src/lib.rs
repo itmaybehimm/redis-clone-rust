@@ -1,183 +1,135 @@
-use std::str::FromStr;
-
+use anyhow::{Context, Ok, Result};
+use bytes::BytesMut;
+use tokio::{io::AsyncReadExt, net::TcpStream};
 #[derive(Debug, PartialEq)]
-pub enum Command {
-    SimpleString,
-    SimpleError,
-    BulkString,
-    Array,
-    Integer,
-    InvalidCommand,
+pub enum Value {
+    SimpleString(String),
+    BulkString(String),
+    Array(Vec<Value>),
+    InvalidValue,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct ClientRequest {
-    pub command: Command,
-    pub data: String,
-    pub elements: Vec<String>,
+#[derive(Debug)]
+pub struct ClientHandler {
+    pub socket: TcpStream,
+    pub buffer: BytesMut,
+    pub value: Value,
 }
 
-impl ClientRequest {
-    pub fn from(message: &str) -> Self {
-        // Check if the message is empty to avoid panic
-        let command = if message.is_empty() {
-            Command::InvalidCommand
-        } else {
-            match message.chars().next().unwrap() {
-                '+' => Command::SimpleString,
-                '-' => Command::SimpleError,
-                ':' => Command::Integer,
-                '$' => Command::BulkString,
-                '*' => Command::Array,
-                _ => Command::InvalidCommand,
-            }
-        };
+impl Value {
+    pub fn serialize(self) -> String {
+        match self {
+            Value::SimpleString(s) => format!("+{}\r\n", s),
+            Value::BulkString(s) => format!("${}\r\n{}\r\n", s.chars().count(), s),
+            _ => panic!("Unsupported value"),
+        }
+    }
+}
 
-        let data = String::from(message);
-        let elements = match command {
-            Command::Array => parse_array_elements(message),
-            Command::SimpleString => parse_simple_string(message),
-            Command::BulkString => parse_bulk_string(message),
-            Command::Integer => parse_integer(message),
-            _ => vec![],
-        };
-
+impl ClientHandler {
+    pub fn new(socket: TcpStream) -> Self {
         Self {
-            command,
-            data,
-            elements,
+            socket,
+            buffer: BytesMut::with_capacity(512),
+            value: Value::InvalidValue,
         }
     }
+
+    pub async fn read_value(&mut self) -> Result<Option<Value>> {
+        let bytes_read = self.socket.read_buf(&mut self.buffer).await?;
+
+        if bytes_read == 0 {
+            return Ok(None);
+        }
+
+        let (value, _) = parse_message(self.buffer.split())?;
+
+        Ok(Some(value))
+    }
+
+    pub async fn write_value(&mut self) {
+        //TODO
+    }
 }
 
-//simple string in formart +(str)\r\n
-fn parse_simple_string(message: &str) -> Vec<String> {
-    let mut elements = Vec::new();
-    let line = message.trim_end();
-    elements.push(line[1..].to_string());
-    elements
+fn parse_message(buffer: BytesMut) -> Result<(Value, usize)> {
+    match buffer[0] as char {
+        '+' => return parse_simple_string(buffer),
+        '$' => return parse_bulk_string(buffer),
+        '*' => return parse_array(buffer),
+        _ => return Err(anyhow::anyhow!("Invalid type {:?}", buffer)),
+    };
 }
 
-//bulk string in formart $(len)\r\n(str)\r\n
-fn parse_bulk_string(message: &str) -> Vec<String> {
-    let mut elements = Vec::new();
-    let mut lines = message.lines();
-    while let Some(line) = lines.next() {
-        if let Some(len) = usize::from_str(&line[1..]).ok() {
-            if let Some(data) = lines.next() {
-                if data.len() == len {
-                    elements.push(data.to_string());
-                }
-            }
+fn parse_simple_string(buffer: BytesMut) -> Result<(Value, usize)> {
+    //skip the +
+    if let Some((line, len)) = read_until_crfl(&buffer[1..]) {
+        let string = String::from_utf8(line.to_vec()).unwrap();
+
+        //what next character should be indexed from since we skipped + len+1
+        return Ok((Value::SimpleString(string), len + 1));
+    } else {
+        return Err(anyhow::anyhow!("Invalid string {:?}", buffer));
+    }
+}
+
+fn parse_array(buffer: BytesMut) -> Result<(Value, usize)> {
+    //first line *(len)
+    // say *2\r\n.....
+    // we read from 2 to \n so consume 3 bytes + 1 * we skipped
+    let (array_length, mut bytes_consumed) =
+        if let Some((line, len)) = read_until_crfl(&buffer[1..]) {
+            let array_length = parse_int(line).unwrap();
+            (array_length, len + 1)
+        } else {
+            return Err(anyhow::anyhow!("Invalid array {:?}", buffer));
+        };
+
+    let mut items = vec![];
+
+    for _ in 0..array_length {
+        let (array_item, length) = parse_message(BytesMut::from(&buffer[bytes_consumed..]))?;
+        bytes_consumed += length;
+        items.push(array_item);
+    }
+
+    return Ok((Value::Array(items), bytes_consumed));
+}
+
+fn parse_bulk_string(buffer: BytesMut) -> Result<(Value, usize)> {
+    //first line $(len)
+    // say $2\r\n.....
+    // we read from 2 to \n so consume 3 bytes + 1 * we skipped
+    let (string_length, bytes_consumed) = if let Some((line, len)) = read_until_crfl(&buffer[1..]) {
+        let string_length = parse_int(line).unwrap();
+        (string_length, len + 1)
+    } else {
+        return Err(anyhow::anyhow!("Invalid bulk string {:?}", buffer));
+    };
+
+    let end_of_bulk_string = bytes_consumed + string_length as usize;
+    let total_parsed = end_of_bulk_string + 2;
+
+    let string = String::from_utf8(buffer[bytes_consumed..end_of_bulk_string].to_vec())
+        .context("Invalid bulk string")?;
+    return Ok((Value::BulkString(string), total_parsed));
+}
+
+fn read_until_crfl(buffer: &[u8]) -> Option<(&[u8], usize)> {
+    for i in 1..buffer.len() {
+        if buffer[i - 1] == b'\r' && buffer[i] == b'\n' {
+            // say abc\r\nab\r\n is buffer so upto \n is i=4 which consumes 5 bytes
+            return Some((&buffer[0..i], i + 1));
         }
     }
-    elements
+    None
 }
 
-//array in format *(sizearray)\r\n(elements)
-fn parse_array_elements(message: &str) -> Vec<String> {
-    let mut elements = Vec::new();
-    let mut lines = message.lines();
-
-    lines.next(); // Skip the array prefix (e.g., *2)
-    while let Some(line) = lines.next() {
-        if line.starts_with('$') {
-            let next_line = lines.next().expect("Invalid bulk string");
-            let combined_line = format!("{}\n{}", line, next_line);
-
-            let parsed_bulk_string = parse_bulk_string(&combined_line);
-
-            for bulk_string in parsed_bulk_string {
-                elements.push(bulk_string);
-            }
-        }
-    }
-    elements
-}
-
-fn parse_integer(message: &str) -> Vec<String> {
-    let mut elements = Vec::new();
-    let line = message.trim_end();
-    elements.push(line[1..].to_string());
-    elements
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_simple_string() {
-        let message = "+OK\r\n";
-        let request = ClientRequest::from(message);
-        assert_eq!(request.command, Command::SimpleString);
-        assert_eq!(request.data, message);
-        assert_eq!(request.elements, vec!["OK".to_string()]);
-    }
-
-    #[test]
-    fn test_parse_error() {
-        let message = "-Error message\r\n";
-        let request = ClientRequest::from(message);
-        assert_eq!(request.command, Command::SimpleError);
-        assert_eq!(request.data, message);
-        assert!(request.elements.is_empty());
-    }
-
-    #[test]
-    fn test_parse_bulk_string() {
-        let message = "$6\r\nfoobar\r\n";
-        let request = ClientRequest::from(message);
-        assert_eq!(request.command, Command::BulkString);
-        assert_eq!(request.data, message);
-        assert_eq!(request.elements, vec!["foobar".to_string()]);
-    }
-
-    #[test]
-    fn test_parse_array() {
-        let message = "*2\r\n$7\r\nCOMMAND\r\n$4\r\nDOCS\r\n";
-        let request = ClientRequest::from(message);
-        assert_eq!(request.command, Command::Array);
-        assert_eq!(request.data, message);
-        assert_eq!(
-            request.elements,
-            vec!["COMMAND".to_string(), "DOCS".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_parse_invalid_command() {
-        let message = "invalid message";
-        let request = ClientRequest::from(message);
-        assert_eq!(request.command, Command::InvalidCommand);
-        assert_eq!(request.data, message);
-        assert!(request.elements.is_empty());
-    }
-
-    #[test]
-    fn test_parse_empty_message() {
-        let message = "";
-        let request = ClientRequest::from(message);
-        assert_eq!(request.command, Command::InvalidCommand);
-        assert_eq!(request.data, message);
-        assert!(request.elements.is_empty());
-    }
-
-    #[test]
-    fn test_parse_array_with_single_element() {
-        let message = "*1\r\n$4\r\nPING\r\n";
-        let request = ClientRequest::from(message);
-        assert_eq!(request.command, Command::Array);
-        assert_eq!(request.data, message);
-        assert_eq!(request.elements, vec!["PING".to_string()]);
-    }
-
-    #[test]
-    fn test_parse_integer() {
-        let message = ":1000\r\n";
-        let request = ClientRequest::from(message);
-        assert_eq!(request.command, Command::Integer);
-        assert_eq!(request.data, message);
-        assert_eq!(request.elements, vec!["1000".to_string()]);
-    }
+fn parse_int(buffer: &[u8]) -> Result<i64> {
+    let string =
+        String::from_utf8(buffer.to_vec()).context("Failed to convert buffer to UTF-8 string")?;
+    let number = string
+        .parse::<i64>()
+        .context("Failed to parse string as i64")?;
+    Ok(number)
 }

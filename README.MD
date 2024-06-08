@@ -1,6 +1,3 @@
-Here's a `README.md` file that provides instructions on how to run the project, access the client using `redis-cli`, and explains the supported commands and concurrency control using `RwLock`.
-
-````markdown
 # Redis Rust Server
 
 This project implements a simple Redis-like server in Rust, supporting basic commands such as `PING`, `ECHO`, `SET`, and `GET`. It also uses `RwLock` for concurrency control to ensure thread-safe access to shared data.
@@ -19,6 +16,7 @@ This project implements a simple Redis-like server in Rust, supporting basic com
    git clone https://github.com/your-username/redis-rust-server.git
    cd redis-rust-server
    ```
+
 ````
 
 2. Run the server using Cargo:
@@ -87,4 +85,6 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ```
 
 This `README.md` provides a comprehensive guide to running the server, using `redis-cli` for testing, and explains the concurrency control mechanism used in the project.
-```
+
+
+````

@@ -25,6 +25,7 @@ pub async fn handle_connection(
                 "echo" => args.first().unwrap().clone(),
                 "get" => get_value(&args, &db_instance).await?,
                 "set" => set_value(&args, &db_instance).await?,
+                "del" => del_value(&args, &db_instance).await?,
                 "quit" => {
                     println!("Client requested to quit.");
                     break;
@@ -95,14 +96,54 @@ async fn set_value(
         _ => return Err(anyhow::anyhow!("Invalid value type")),
     };
 
+    let result;
+
     // Acquire a write lock on the database instance
     {
         let mut instance = db_instance.write().await;
-        instance.insert(key, value);
+        result = instance.insert(key, value);
     } // The write lock is dropped here
 
-    // Return a success message
-    Ok(Value::BulkString("Successfully set value".to_owned()))
+    match result {
+        Some(_) => Ok(Value::BulkString(
+            "Scucessfully updated value in database".to_owned(),
+        )),
+        None => Ok(Value::BulkString(
+            "Scucessfully inserted value in database".to_owned(),
+        )),
+    }
+}
+
+async fn del_value(
+    args: &Vec<Value>,
+    db_instance: &Arc<RwLock<HashMap<String, String>>>,
+) -> Result<Value> {
+    // Ensure there are enough arguments for setting a value
+    if args.len() < 1 {
+        return Err(anyhow::anyhow!("Not enough arguments for DEL command"));
+    }
+
+    // Extract the key and value from arguments
+    let key = match args.first() {
+        Some(Value::BulkString(key)) => key.clone(),
+        _ => return Err(anyhow::anyhow!("Invalid key type")),
+    };
+
+    let value;
+
+    {
+        let mut instace = db_instance.write().await;
+        value = instace.remove(&key);
+    }
+
+    match value {
+        Some(_) => Ok(Value::BulkString(
+            "Removed the key from database".to_owned(),
+        )),
+        None => Ok(Value::SimpleError(
+            "Value doesnt exist in database".to_owned(),
+        )),
+    }
 }
 
 //"*2\r\n$4\r\nECHO\r\n$3\r\nHEY\r\n"

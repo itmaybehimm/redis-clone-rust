@@ -14,8 +14,8 @@ This project implements a simple Redis-like server in Rust, supporting basic com
 1. Clone the repository:
 
    ```sh
-   git clone https://github.com/your-username/redis-rust-server.git
-   cd redis-rust-server
+   git clone https://github.com/itmaybehimm/redis-clone-rust.git
+   cd redis-clone-rust
    ```
 
 2. Run the server using Cargo:

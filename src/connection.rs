@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use redis_rust::{RespHandler, Value};
+use redis_rust::{RespHandler, UserCommand, Value};
 use tokio::time::{self, sleep};
 
 use std::{collections::HashMap, sync::Arc};
@@ -21,15 +21,15 @@ pub async fn handle_connection(
         let response = if let Some(value) = value {
             let (command, args) = extract_command(value)?;
 
-            match command.to_lowercase().as_str() {
-                "ping" => Value::SimpleString("PONG".to_owned()),
-                "echo" => args.first().unwrap().clone(),
-                "get" => get_value(&args, &db_instance).await?,
-                "mget" => mget_value(&args, &db_instance).await?,
-                "expire" => expire_value(&args, &db_instance).await?,
-                "set" => set_value(&args, &db_instance).await?,
-                "del" => del_value(&args, &db_instance).await?,
-                "quit" => {
+            match command {
+                UserCommand::Ping => Value::SimpleString("PONG".to_owned()),
+                UserCommand::Echo => args.first().unwrap().clone(),
+                UserCommand::Get => get_value(&args, &db_instance).await?,
+                UserCommand::Mget => mget_value(&args, &db_instance).await?,
+                UserCommand::Expire => expire_value(&args, &db_instance).await?,
+                UserCommand::Set => set_value(&args, &db_instance).await?,
+                UserCommand::Del => del_value(&args, &db_instance).await?,
+                UserCommand::Quit => {
                     println!("Client requested to quit.");
                     break;
                 }
@@ -222,10 +222,10 @@ async fn expire_value(
 
 //"*2\r\n$4\r\nECHO\r\n$3\r\nHEY\r\n"
 // return (command, Vec<Argumets>)
-pub fn extract_command(value: Value) -> Result<(String, Vec<Value>)> {
+pub fn extract_command(value: Value) -> Result<(UserCommand, Vec<Value>)> {
     match value {
         Value::Array(array) => Ok((
-            unpack_bulk_string(array.first().unwrap().clone())?,
+            UserCommand::from(unpack_bulk_string(array.first().unwrap().clone())?),
             array.into_iter().skip(1).collect(),
         )),
         _ => return Err(anyhow::anyhow!("Invalid command")),

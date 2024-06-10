@@ -5,6 +5,18 @@ use tokio::{
     net::TcpStream,
 };
 
+pub enum UserCommand {
+    Ping,
+    Echo,
+    Get,
+    Mget,
+    Set,
+    Del,
+    Expire,
+    Quit,
+    Invalid,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     SimpleString(String),
@@ -19,6 +31,23 @@ pub struct RespHandler {
     pub socket: TcpStream,
     pub buffer: BytesMut,
     pub value: Value,
+}
+
+impl UserCommand {
+    pub fn from(command: String) -> Self {
+        match command.to_uppercase().as_str() {
+            "PING" => Self::Ping,
+            "ECHO" => Self::Echo,
+            "GET" => Self::Get,
+            "MGET" => Self::Mget,
+            "SET" => Self::Set,
+            "DEL" => Self::Del,
+            "EXPIRE" => Self::Expire,
+            "QUIT" => Self::Quit,
+
+            _ => Self::Invalid,
+        }
+    }
 }
 
 impl Value {

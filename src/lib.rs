@@ -26,9 +26,18 @@ impl Value {
         match self {
             Value::SimpleString(s) => format!("+{}\r\n", s),
             Value::BulkString(s) => format!("${}\r\n{}\r\n", s.chars().count(), s),
+            Value::Array(arr) => Value::serialize_array(arr),
             Value::SimpleError(s) => format!("-{}\r\n", s),
             _ => panic!("Unsupported value"),
         }
+    }
+
+    fn serialize_array(arr: Vec<Value>) -> String {
+        let mut serialized = format!("*{}\r\n", arr.len());
+        for value in arr {
+            serialized.push_str(&value.serialize());
+        }
+        serialized
     }
 }
 
@@ -142,6 +151,82 @@ fn parse_int(buffer: &[u8]) -> Result<i64> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use anyhow::Result;
+    use bytes::BytesMut;
+
+    #[test]
+    fn test_serialize_simple_string() -> Result<()> {
+        let value = Value::SimpleString("OK".to_string());
+        assert_eq!(value.serialize(), "+OK\r\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_serialize_bulk_string() -> Result<()> {
+        let value = Value::BulkString("foobar".to_string());
+        assert_eq!(value.serialize(), "$6\r\nfoobar\r\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_serialize_simple_error() -> Result<()> {
+        let value = Value::SimpleError("Error message".to_string());
+        assert_eq!(value.serialize(), "-Error message\r\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_serialize_array() -> Result<()> {
+        let value = Value::Array(vec![
+            Value::SimpleString("foo".to_string()),
+            Value::BulkString("bar".to_string()),
+        ]);
+        assert_eq!(value.serialize(), "*2\r\n+foo\r\n$3\r\nbar\r\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_simple_string() -> Result<()> {
+        let buffer = BytesMut::from("+OK\r\n");
+        let (value, _) = parse_simple_string(buffer)?;
+        assert_eq!(value, Value::SimpleString("OK".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_bulk_string() -> Result<()> {
+        let buffer = BytesMut::from("$6\r\nfoobar\r\n");
+        let (value, _) = parse_bulk_string(buffer)?;
+        assert_eq!(value, Value::BulkString("foobar".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_simple_error() -> Result<()> {
+        let buffer = BytesMut::from("-Error message\r\n");
+        let (value, _) = parse_simple_error(buffer)?;
+        assert_eq!(value, Value::SimpleError("Error message".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_array() -> Result<()> {
+        let buffer = BytesMut::from("*2\r\n+foo\r\n$3\r\nbar\r\n");
+        let (value, _) = parse_array(buffer)?;
+        assert_eq!(
+            value,
+            Value::Array(vec![
+                Value::SimpleString("foo".to_string()),
+                Value::BulkString("bar".to_string()),
+            ])
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod client_server_tests {
     use super::*;
     use anyhow::Result;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

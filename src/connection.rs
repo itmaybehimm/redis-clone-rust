@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 use redis_rust::{RespHandler, Value};
+use tokio::time::{self, sleep};
 
 use std::{collections::HashMap, sync::Arc};
 use tokio::net::TcpStream;
@@ -24,6 +25,8 @@ pub async fn handle_connection(
                 "ping" => Value::SimpleString("PONG".to_owned()),
                 "echo" => args.first().unwrap().clone(),
                 "get" => get_value(&args, &db_instance).await?,
+                "mget" => mget_value(&args, &db_instance).await?,
+                "expire" => expire_value(&args, &db_instance).await?,
                 "set" => set_value(&args, &db_instance).await?,
                 "del" => del_value(&args, &db_instance).await?,
                 "quit" => {
@@ -74,6 +77,44 @@ async fn get_value(
         Some(string) => Ok(Value::BulkString(string)),
         None => Ok(Value::SimpleError("key has no associated value".to_owned())),
     }
+}
+
+async fn mget_value(
+    args: &Vec<Value>,
+    db_instance: &Arc<RwLock<HashMap<String, String>>>,
+) -> Result<Value> {
+    // Ensure there is at least one argument
+    if args.is_empty() {
+        return Ok(Value::SimpleError(
+            "Missing argument for MGET command".to_owned(),
+        ));
+    }
+
+    // Acquire a read lock on the database instance
+    let instance = db_instance.read().await;
+
+    let mut result = Vec::new();
+
+    // Match the item to ensure it's a BulkString and get the corresponding value from the database
+    for value in args.iter() {
+        let key = match value {
+            Value::BulkString(key) => key.clone(),
+            _ => {
+                return Ok(Value::SimpleError(
+                    "One or more keys are invalid".to_owned(),
+                ))
+            }
+        };
+
+        let value = match instance.get(&key) {
+            Some(string) => Value::BulkString(string.clone()),
+            None => Value::SimpleError(format!("The key {} has no associated value", key)),
+        };
+
+        result.push(value);
+    }
+
+    Ok(Value::Array(result))
 }
 
 async fn set_value(
@@ -143,6 +184,39 @@ async fn del_value(
         None => Ok(Value::SimpleError(
             "Value doesnt exist in database".to_owned(),
         )),
+    }
+}
+
+async fn expire_value(
+    args: &Vec<Value>,
+    db_instance: &Arc<RwLock<HashMap<String, String>>>,
+) -> Result<Value> {
+    if args.len() != 2 {
+        return Ok(Value::SimpleError("Invalid number of arguments".to_owned()));
+    }
+
+    if let (Some(Value::BulkString(key)), Some(Value::BulkString(seconds))) =
+        (args.get(0), args.get(1))
+    {
+        let seconds = seconds.parse();
+        let seconds = match seconds {
+            Ok(s) => s,
+            Err(_) => return Ok(Value::SimpleError("Invalid number of seconds".to_owned())),
+        };
+        let seconds = time::Duration::from_secs(seconds);
+
+        let key_clone = key.clone();
+        let db_instance_clone = Arc::clone(db_instance);
+
+        tokio::spawn(async move {
+            sleep(seconds).await;
+            let mut instance = db_instance_clone.write().await;
+            instance.remove(&key_clone);
+            println!("removed: {} after {:?} seconds", key_clone, seconds);
+        });
+        Ok(Value::SimpleString("OK".to_owned()))
+    } else {
+        Ok(Value::SimpleError("Invalid arguments".to_owned()))
     }
 }
 

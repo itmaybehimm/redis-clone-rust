@@ -1,4 +1,5 @@
 mod connection;
+mod parser;
 
 use std::{collections::HashMap, sync::Arc};
 
